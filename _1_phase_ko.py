@@ -3,10 +3,12 @@ import math
 import random
 import os
 import tempfile
-
 from start import Button
 from PIL import Image
+from start import StartView
 
+SCREEN_WIDTH = 1280
+SCREEN_HEIGHT = 720
 # Загрузка документов как изображений
 DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs")
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "_cache")
@@ -194,6 +196,15 @@ class Phase1KoView(arcade.View):
         self.fading_in = True
         self.time = 0.0
 
+        # Окончание фазы
+
+        self.menu_button = Button(SCREEN_WIDTH // 2 - 150, SCREEN_HEIGHT // 2 - 100, 250, 60, "В ГЛАВНОЕ МЕНЮ")
+        self.next_button = Button(SCREEN_WIDTH // 2 + 150, SCREEN_HEIGHT // 2 - 100, 250, 60, "ДАЛЕЕ")
+        self.menu_button.on_click = self.go_to_menu
+        self.next_button.on_click = self.go_to_next_phase
+        self.phase_finished = False
+        self.end_delay_timer = 2.0
+
     def _position_elements(self, width, height):
         if self.bg:
             self.bg.center_x = width / 2
@@ -216,6 +227,12 @@ class Phase1KoView(arcade.View):
             y = dept_start_y - i * dept_spacing
             self.dept_positions[dept] = (dept_x, y)
 
+        self.menu_button.center_x = 150
+        self.menu_button.center_y = 60
+
+        self.next_button.center_x = width - 150
+        self.next_button.center_y = 60
+
     def on_resize(self, width, height):
         super().on_resize(width, height)
         self._position_elements(width, height)
@@ -225,6 +242,7 @@ class Phase1KoView(arcade.View):
         self._position_elements(self.window.width, self.window.height)
         self.fade_alpha = 255
         self.fading_in = True
+        self.phase_finished = False
 
     def on_update(self, delta_time):
         self.time += delta_time
@@ -244,7 +262,7 @@ class Phase1KoView(arcade.View):
 
         # Анимация открытия документа
         if self.state == STATE_OPENING:
-            self.anim_progress += delta_time * 3.5
+            self.anim_progress += delta_time * 1.5
             if self.anim_progress >= 1.0:
                 self.anim_progress = 1.0
                 self.state = STATE_OPEN
@@ -255,6 +273,19 @@ class Phase1KoView(arcade.View):
             if self.anim_progress >= 1.0:
                 self.anim_progress = 1.0
                 self._finish_sort()
+
+        if self.phase_finished:
+            if self.end_delay_timer > 0:
+                # Сначала просто ждем, чтобы игрок прочитал надпись
+                self.end_delay_timer -= delta_time
+            else:
+                if self.fade_alpha < 255:
+                    self.fade_alpha += delta_time * 350  # Увеличиваем черноту
+                if self.fade_alpha > 255:
+                    self.fade_alpha = 255
+        if self.phase_finished and self.fade_alpha >= 250:
+            self.menu_button.update(delta_time)
+            self.next_button.update(delta_time)
 
     def _open_document(self, index):
         """Открыть документ из списка"""
@@ -329,7 +360,7 @@ class Phase1KoView(arcade.View):
             self.notification = {
                 "text": "Верно! Документ передан в нужный отдел.",
                 "color": (80, 220, 100, 255),
-                "timer": 3.0
+                "timer": 3.5
             }
         else:
             self.mistakes += 1
@@ -450,7 +481,7 @@ class Phase1KoView(arcade.View):
                 anchor_x="center", anchor_y="center", bold=True,
             )
 
-    def _draw_open_document(self, w, h):
+    def _draw_open_document(self, w, h):  # тут остановился
         """Рисуем открытый документ как оригинальное изображение Word-страниц"""
         if self.state == STATE_OPENING:
             t = _ease_out_back(min(self.anim_progress, 1.0))
@@ -590,6 +621,7 @@ class Phase1KoView(arcade.View):
 
         # Результат когда всё отсортировано
         if remaining == 0 and self.state == STATE_IDLE:
+            self.phase_finished = True
             arcade.draw_lbwh_rectangle_filled(0, 0, w, h, (0, 0, 0, 150))
             arcade.draw_text(
                 "СОРТИРОВКА ЗАВЕРШЕНА", w / 2, h / 2 + 30,
@@ -661,17 +693,32 @@ class Phase1KoView(arcade.View):
                 font_name=("Garamond", "Palatino Linotype", "Georgia"),
                 anchor_x="center", anchor_y="center",
             )
+            self.phase_finished = True
 
         # Fade overlay
         if self.fade_alpha > 0:
             arcade.draw_lbwh_rectangle_filled(0, 0, w, h, (0, 0, 0, int(self.fade_alpha)))
+        if self.phase_finished and self.fade_alpha >= 250:
+            arcade.draw_text(
+                "ФАЗА 1 ОКОНЧЕНА",
+                w / 2, h * 0.8,
+                arcade.color.GOLD,
+                font_size=40,
+                anchor_x="center",
+                font_name=("Garamond", "Palatino Linotype", "Georgia")
+            )
+            self.menu_button.draw()
+            self.next_button.draw()
 
     # ─── Ввод ─────────────────────────────────────────────────────────
 
     def on_mouse_motion(self, x, y, dx, dy):
         w = self.window.width
         h = self.window.height
-
+        if self.phase_finished and self.fade_alpha >= 250:
+            self.menu_button.check_hover(x, y)
+            self.next_button.check_hover(x, y)
+            return
         # Проверяем наведение на документы
         self.hovered_doc = -1
         if self.state == STATE_IDLE:
@@ -705,6 +752,10 @@ class Phase1KoView(arcade.View):
         w = self.window.width
         h = self.window.height
 
+        if self.phase_finished and self.fade_alpha >= 250:
+            self.menu_button.check_press(x, y)
+            self.next_button.check_press(x, y)
+            return
         # Клик по документу из списка
         if self.state == STATE_IDLE and len(self.doc_queue) > 0:
             list_x = w * 0.18
@@ -735,6 +786,19 @@ class Phase1KoView(arcade.View):
 
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         """Прокрутка колёсиком мыши для просмотра документа"""
-        if self.state == STATE_OPEN:
+        if self.state == STATE_OPEN and not self.phase_finished:
             self.scroll_offset -= scroll_y * 40
             self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
+
+    def on_mouse_release(self, x, y, button, modifiers):
+        if button == arcade.MOUSE_BUTTON_LEFT:
+            if self.phase_finished and self.fade_alpha >= 250:
+                self.menu_button.check_release(x, y)
+                self.next_button.check_release(x, y)
+
+    def go_to_menu(self):
+        menu = StartView()
+        self.window.show_view(menu)
+
+    def go_to_next_phase(self):
+        print("Переход к Фазе 2: Константин Частичная Автоматизация")
